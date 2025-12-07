@@ -1,0 +1,14 @@
+service ctf
+{
+    disable     = no
+    socket_type = stream
+    protocol    = tcp
+    wait        = no
+    user        = root
+    type        = UNLISTED
+    port        = 8888
+    bind        = 0.0.0.0
+    server      = /bin/su
+    server_args = -s /bin/bash ctf -c /home/ctf/run.sh
+    banner_fail = /etc/banner_fail
+}
