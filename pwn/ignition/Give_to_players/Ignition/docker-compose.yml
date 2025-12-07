@@ -1,0 +1,11 @@
+services:
+  pwn:
+    build: ./src
+    platform: linux/amd64
+    ports:
+      - "8888:8888"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 50M

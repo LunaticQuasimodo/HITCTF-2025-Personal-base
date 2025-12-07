@@ -1,0 +1,79 @@
+diff --git a/src/d8/d8.cc b/src/d8/d8.cc
+index d91c78951b3..286129b5491 100644
+--- a/src/d8/d8.cc
++++ b/src/d8/d8.cc
+@@ -3220,6 +3220,65 @@ void Shell::WriteStdout(const v8::FunctionCallbackInfo<v8::Value>& info) {
+   WriteToFile(stdout, info);
+ }
+ 
++namespace {
++std::atomic<bool> g_magic_called_once{false};
++}
++void MagicBytecodePatch(const v8::FunctionCallbackInfo<v8::Value>& args) {
++  v8::Isolate* isolate = args.GetIsolate();
++  v8::HandleScope scope(isolate);
++
++  // One-shot guard: only the first call succeeds; later calls throw.
++  if (g_magic_called_once.exchange(true, std::memory_order_acq_rel)) {
++    ThrowError(isolate, "magic() can only be called once");
++    return;
++  }
++
++  if (args.Length() < 3 || !args[0]->IsObject()) return;
++
++  v8::Local<v8::Object> obj = args[0].As<v8::Object>();
++  int offset = args[1]->Int32Value(isolate->GetCurrentContext()).FromMaybe(-1);
++  int value  = args[2]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0);
++  if (offset < 0) return;
++
++  i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(isolate);
++
++  i::Handle<i::Object> internal = v8::Utils::OpenHandle(*obj);
++
++  i::Handle<i::BytecodeArray> bca;
++
++  if (IsBytecodeArray(*internal)) {
++    bca = handle(i::SbxCast<i::BytecodeArray>(*internal), i_isolate);
++  } else if (IsHeapObject(*internal) &&
++             IsJSFunctionOrBoundFunctionOrWrappedFunction(
++                 *i::Cast<i::HeapObject>(internal))) {
++    auto callable =
++        i::Cast<i::JSFunctionOrBoundFunctionOrWrappedFunction>(internal);
++    while (IsJSBoundFunction(*callable)) {
++      internal::DisallowGarbageCollection no_gc;
++      auto bound_function = i::Cast<i::JSBoundFunction>(callable);
++      auto bound_target = bound_function->bound_target_function();
++      if (!IsJSFunctionOrBoundFunctionOrWrappedFunction(bound_target)) {
++        return;
++      }
++      callable = handle(
++          i::Cast<i::JSFunctionOrBoundFunctionOrWrappedFunction>(bound_target),
++          i_isolate);
++    }
++    i::DirectHandle<i::JSFunction> function = i::Cast<i::JSFunction>(callable);
++    if (!function->shared()->HasBytecodeArray()) return;
++    bca = handle(function->shared()->GetBytecodeArray(i_isolate), i_isolate);
++  } else {
++    return;
++  }
++
++  int length = bca->length();
++  if (offset >= length) return;
++
++  uint8_t* bytes =
++      reinterpret_cast<uint8_t*>(bca->GetFirstBytecodeAddress());
++  bytes[offset] = static_cast<uint8_t>(value & 0xFF);
++}
++
+ // There are two overloads of writeFile().
+ //
+ // The first parameter is always the filename.
+@@ -4237,6 +4296,8 @@ Local<ObjectTemplate> Shell::CreateGlobalTemplate(Isolate* isolate) {
+                        FunctionTemplate::New(isolate, ExecuteFile));
+   global_template->Set(isolate, "setTimeout",
+                        FunctionTemplate::New(isolate, SetTimeout));
++                       
++  global_template->Set(isolate, "magic", v8::FunctionTemplate::New(isolate, MagicBytecodePatch));
+   // Some Emscripten-generated code tries to call 'quit', which in turn would
+   // call C's exit(). This would lead to memory leaks, because there is no way
+   // we can terminate cleanly then, so we need a way to hide 'quit'.

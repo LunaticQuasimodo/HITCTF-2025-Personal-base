@@ -1,0 +1,24 @@
+FROM ubuntu:24.04
+
+RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.ustc.edu.cn@g' /etc/apt/sources.list \
+    && sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list \
+    && apt-get update && apt-get -y upgrade \
+    && apt-get install -y xinetd \
+    && apt-get autoclean && apt-get clean \
+    && apt-get install -y python3 \
+    && useradd -m ctf
+
+RUN apt install -y libcap2-bin
+
+COPY ./entrypoint.sh /
+COPY ./rootfs /home/ctf/
+COPY ./ctf.xinetd /etc/xinetd.d/ctf
+
+RUN chmod 755 /home/ctf \
+    && chown -R root:root /home/ctf \
+    && chown ctf:ctf /home/ctf \
+    && echo 'ctf - nproc 1500' >>/etc/security/limits.conf
+
+ENTRYPOINT [ "/entrypoint.sh" ]
+
+EXPOSE 8888
